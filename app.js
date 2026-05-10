@@ -2,7 +2,15 @@ const express = require('express');
 const app = express();
 const port = 3000;
 
-const { tasks: seededTasks } = require('./task.json');
+let seededTasks = [];
+try {
+    const taskData = require('./task.json');
+    if (taskData && Array.isArray(taskData.tasks)) {
+        seededTasks = taskData.tasks;
+    }
+} catch (error) {
+    seededTasks = [];
+}
 
 const ALLOWED_PRIORITIES = ['low', 'medium', 'high'];
 
@@ -28,10 +36,15 @@ const tasks = seededTasks.map((task, index) => ({
     createdAt: new Date(Date.now() - (seededTasks.length - index) * 1000).toISOString(),
 }));
 
+let nextTaskId = tasks.length ? Math.max(...tasks.map((task) => task.id)) + 1 : 1;
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 function validateTaskPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return false;
+    }
     const hasTitle = typeof payload.title === 'string' && payload.title.trim().length > 0;
     const hasDescription = typeof payload.description === 'string' && payload.description.trim().length > 0;
     const hasCompleted = typeof payload.completed === 'boolean';
@@ -52,14 +65,13 @@ app.get('/tasks', (req, res) => {
 
     const result = tasks
         .filter((task) => (completed === undefined ? true : task.completed === completed))
-        .slice()
         .sort((a, b) => {
             const aTime = Date.parse(a.createdAt);
             const bTime = Date.parse(b.createdAt);
             return bTime - aTime;
         });
 
-    res.send(result);
+    res.status(200).send(result);
 });
 
 app.get('/tasks/priority/:level', (req, res) => {
@@ -68,18 +80,21 @@ app.get('/tasks/priority/:level', (req, res) => {
         return res.status(400).send('Invalid priority level');
     }
 
-    res.send(tasks.filter((task) => task.priority === level));
+    res.status(200).send(tasks.filter((task) => task.priority === level));
 });
 
 app.get('/tasks/:id', (req, res) => {
     const id = Number(req.params.id);
+    if (Number.isNaN(id)) {
+        return res.status(400).send('Invalid task id');
+    }
     const task = tasks.find((currentTask) => currentTask.id === id);
 
     if (!task) {
         return res.status(404).send('Task not found');
     }
 
-    res.send(task);
+    res.status(200).send(task);
 });
 
 app.post('/tasks', (req, res) => {
@@ -90,7 +105,7 @@ app.post('/tasks', (req, res) => {
     const priority = normalizePriority(req.body.priority) || 'low';
 
     const nextTask = {
-        id: tasks.length ? Math.max(...tasks.map((task) => task.id)) + 1 : 1,
+        id: nextTaskId,
         title: req.body.title,
         description: req.body.description,
         completed: req.body.completed,
@@ -99,6 +114,7 @@ app.post('/tasks', (req, res) => {
     };
 
     tasks.push(nextTask);
+    nextTaskId += 1;
     res.status(201).send(nextTask);
 });
 
@@ -108,13 +124,17 @@ app.put('/tasks/:id', (req, res) => {
     }
 
     const id = Number(req.params.id);
+    if (Number.isNaN(id)) {
+        return res.status(400).send('Invalid task id');
+    }
     const taskIndex = tasks.findIndex((currentTask) => currentTask.id === id);
 
     if (taskIndex === -1) {
         return res.status(404).send('Task not found');
     }
 
-    const priority = normalizePriority(req.body.priority) || tasks[taskIndex].priority || 'low';
+    const existingTask = tasks[taskIndex];
+    const priority = normalizePriority(req.body.priority) || existingTask.priority || 'low';
 
     tasks[taskIndex] = {
         id,
@@ -122,14 +142,17 @@ app.put('/tasks/:id', (req, res) => {
         description: req.body.description,
         completed: req.body.completed,
         priority,
-        createdAt: tasks[taskIndex].createdAt,
+        createdAt: existingTask.createdAt,
     };
 
-    res.send(tasks[taskIndex]);
+    res.status(200).send(tasks[taskIndex]);
 });
 
 app.delete('/tasks/:id', (req, res) => {
     const id = Number(req.params.id);
+    if (Number.isNaN(id)) {
+        return res.status(400).send('Invalid task id');
+    }
     const taskIndex = tasks.findIndex((currentTask) => currentTask.id === id);
 
     if (taskIndex === -1) {
